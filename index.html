@@ -5,9 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Happy Halloween 🎃</title>
   <style>
+    :root { --orange: #ff7518; }
+
     body {
       background-color: #0d0d0d;
-      color: #ff7518;
+      color: var(--orange);
       font-family: "Trebuchet MS", sans-serif;
       display: flex;
       flex-direction: column;
@@ -16,12 +18,14 @@
       height: 100vh;
       text-align: center;
       overflow: hidden;
+      position: relative;
     }
 
     h1 {
       font-size: 3em;
-      text-shadow: 2px 2px 10px #ff7518, 0 0 20px #ffb347;
+      text-shadow: 2px 2px 10px var(--orange), 0 0 20px #ffb347;
       animation: flicker 2s infinite alternate;
+      z-index: 2;
     }
 
     @keyframes flicker {
@@ -33,11 +37,21 @@
     .pumpkin {
       font-size: 6em;
       animation: bounce 2s infinite;
+      z-index: 2;
     }
 
     @keyframes bounce {
       0%, 100% { transform: translateY(0); }
-      50% { transform: translateY(-10px); }
+      50%      { transform: translateY(-10px); }
+    }
+
+    video {
+      width: 80%;
+      max-width: 800px;
+      border-radius: 15px;
+      box-shadow: 0 0 30px var(--orange);
+      margin-bottom: 20px;
+      z-index: 2;
     }
 
     footer {
@@ -46,20 +60,170 @@
       font-size: 1.2em;
       color: #f5f5f5;
       opacity: 0.7;
+      z-index: 2;
+    }
+
+    /* === Ghost layer is now on top of everything === */
+    .ghost-layer {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      z-index: 9999;           /* 🔼 bring to very front */
+      overflow: hidden;
+    }
+
+    .ghost {
+      position: absolute;
+      top: 0;
+      left: 0;
+      font-size: clamp(24px, 4vw, 64px);
+      filter: drop-shadow(0 0 6px rgba(255, 255, 255, 0.85))
+              drop-shadow(0 0 14px rgba(173, 216, 230, 0.35));
+      opacity: 0.9;
+      will-change: transform, offset-distance;
+      /* Motion-path defaults (overridden per-ghost in JS) */
+      offset-rotate: 0deg;
+      offset-path: path("M 0 0 C 25 25, 75 -25, 100 0");
+      animation: travel linear infinite, bob 4.5s ease-in-out infinite;
+    }
+
+    .ghost::before { content: "👻"; display: block; }
+
+    /* offset-distance drives movement along the random path */
+    @keyframes travel {
+      from { offset-distance: 0%;   transform: translateZ(0) }
+      to   { offset-distance: 100%; transform: translateZ(0) }
+    }
+
+    /* Gentle up-down bobbing */
+    @keyframes bob {
+      0%, 100% { margin-top: 0 }
+      50%      { margin-top: -8px }
+    }
+
+    /* Reduced motion: keep them subtle, no path travel */
+    @media (prefers-reduced-motion: reduce) {
+      .ghost { animation: bob 6s ease-in-out infinite; }
     }
   </style>
 </head>
 <body>
 
- <iframe 
-    width="0" height="0"
-    src="https://www.youtube.com/embed/sVjk5nrb_lI?autoplay=1&mute=1&loop=1&playlist=sVjk5nrb_lI"
-    frameborder="0"
-    allow="autoplay"
-  ></iframe>
+  <div class="ghost-layer" id="ghostLayer" aria-hidden="true"></div>
+
+  <video controls autoplay loop muted playsinline>
+    <source src="spooky.mp4" type="video/mp4" />
+    Your browser does not support the video tag.
+  </video>
 
   <div class="pumpkin">🎃</div>
   <h1>Happy Halloween from<br>MDTC Cyber Security!</h1>
   <footer>Stay spooky & stay secure 🕸️</footer>
+
+  <script>
+    (function () {
+      const layer = document.getElementById('ghostLayer');
+
+      const GHOST_COUNT = 18;
+      const MIN_DURATION = 12;  // slower = spookier
+      const MAX_DURATION = 30;
+
+      const supportsMotionPath = 'offsetPath' in document.documentElement.style;
+
+      function rand(min, max) {
+        return Math.random() * (max - min) + min;
+      }
+
+      function randomBezierPath(startSide = 'left') {
+        // Coordinates in viewport (vw/vh) converted to CSS px later
+        const w = window.innerWidth;
+        const h = window.innerHeight;
+
+        // Start just off-screen on either side
+        const x0 = startSide === 'left' ? -0.12 * w : 1.12 * w;
+        const y0 = rand(0.05 * h, 0.95 * h);
+
+        // End opposite side
+        const x3 = startSide === 'left' ? 1.12 * w : -0.12 * w;
+        const y3 = rand(0.05 * h, 0.95 * h);
+
+        // Two control points to create a nice S-curve with some vertical swing
+        const x1 = rand(0.15 * w, 0.45 * w);
+        const y1 = rand(0.05 * h, 0.95 * h);
+        const x2 = rand(0.55 * w, 0.85 * w);
+        const y2 = rand(0.05 * h, 0.95 * h);
+
+        // SVG path() string in absolute pixels for maximum browser compatibility
+        return `path("M ${x0} ${y0} C ${x1} ${y1}, ${x2} ${y2}, ${x3} ${y3}")`;
+      }
+
+      function spawnGhost() {
+        const el = document.createElement('div');
+        el.className = 'ghost';
+
+        // Random scale + subtle spin variance applied via rotate in fallback mode
+        const scale = rand(0.7, 1.6);
+        el.style.fontSize = `calc(clamp(24px, 4vw, 64px) * ${scale})`;
+        el.style.opacity = rand(0.65, 0.95).toFixed(2);
+
+        // Random duration and negative delay (so paths are de-synchronized)
+        const duration = rand(MIN_DURATION, MAX_DURATION);
+        const delay = -rand(0, MAX_DURATION);
+
+        // Random direction (left->right or right->left)
+        const startSide = Math.random() < 0.5 ? 'left' : 'right';
+
+        if (supportsMotionPath && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+          const path = randomBezierPath(startSide);
+          el.style.offsetPath = path;
+          el.style.animationDuration = `${duration}s, ${rand(3, 6)}s`;
+          el.style.animationDelay = `${delay}s, ${rand(0, 2)}s`;
+        } else {
+          // Fallback: manual animation using rAF with a wavy path
+          const startX = startSide === 'left' ? -0.12 * innerWidth : 1.12 * innerWidth;
+          const endX   = startSide === 'left' ? 1.12 * innerWidth : -0.12 * innerWidth;
+          const baseY  = rand(0.1 * innerHeight, 0.9 * innerHeight);
+          const amp    = rand(20, 120); // vertical amplitude
+          const freq   = rand(0.002, 0.006); // wave frequency
+          const spin   = (Math.random() < 0.5 ? -1 : 1) * rand(2, 8);
+
+          let start = performance.now() + delay * 1000; // negative delay desync
+          const run = (t) => {
+            const elapsed = (t - start) / 1000;
+            const p = Math.min(Math.max(elapsed / duration, 0), 1); // 0..1
+            const x = startX + (endX - startX) * p;
+            const y = baseY + Math.sin((t + Math.random()*1000) * freq) * amp;
+            el.style.transform = `translate(${x}px, ${y}px) rotate(${spin}deg)`;
+            if (p < 1) requestAnimationFrame(run); else {
+              // restart with new random parameters for endless haunt
+              layer.removeChild(el);
+              spawnGhost();
+            }
+          };
+          requestAnimationFrame(run);
+        }
+
+        // Random vertical layering within ghost layer (purely visual)
+        el.style.zIndex = String(Math.floor(rand(1, 100)));
+
+        layer.appendChild(el);
+      }
+
+      for (let i = 0; i < GHOST_COUNT; i++) spawnGhost();
+
+      // Re-seed paths on resize so curves still span the viewport nicely
+      let resizeTimer;
+      window.addEventListener('resize', () => {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(() => {
+          if (!supportsMotionPath) return;
+          [...layer.children].forEach(ghost => {
+            const startSide = Math.random() < 0.5 ? 'left' : 'right';
+            ghost.style.offsetPath = randomBezierPath(startSide);
+          });
+        }, 200);
+      });
+    })();
+  </script>
 </body>
 </html>
